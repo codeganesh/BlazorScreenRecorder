@@ -1,0 +1,217 @@
+﻿@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="d-flex flex-column-reverse align-items-center position-relative">
+    <video @ref="videoElement"
+           style="width:50%;
+        height:auto;
+        background-color:aliceblue;
+        border-radius:0.3rem;
+        border:1px solid black;
+        aspect-ratio:16/9;" autoplay muted>
+    </video>
+    <div class="position-absolute w-50 text-center bg-success bg-opacity-10">          
+        
+        @switch (recorderState)
+        {
+            case RecorderState.Idle:
+
+                <button @onclick="StartSharing"
+                        class="btn btn-primary shadow-none">
+                    Start Sharing
+                </button>
+
+                break;
+
+            case RecorderState.NotRecording:
+
+                <button @onclick="StartRecording"
+                        class="btn btn-danger shadow-none">
+                   Record
+                </button>
+
+                break;
+
+                case RecorderState.Recording:
+
+                <button @onclick="PauseResumeRecording"
+                        class="btn btn-@(isPaused ? "warning" : "success") shadow-none">
+                    @(isPaused ? "Resume" : "Pause")
+                </button>
+                <button @onclick="StopRecording"
+                        class="btn btn-primary shadow-none ms-2">
+                    Stop
+                </button>
+
+                break;
+
+                case RecorderState.RecordingComplete:
+
+             
+                <button @onclick="Restart"
+                        class="btn btn-secondary shadow-none ms-2">
+                    Restart
+                </button>
+                <a href="@mediaBlobUrl"
+                       download="@fileName"
+                       class="btn btn-success shadow-none">
+                    Download
+                </a>
+                break;
+
+        }
+
+            
+    </div>
+
+</div>
+
+@if (!string.IsNullOrEmpty(message))
+{
+    <div class="d-flex justify-content-center">
+        <h3 class="text-center text-white bg-danger">@message</h3>
+
+    </div>
+}
+
+@code {
+
+    private ElementReference videoElement;
+    private IJSObjectReference? module,recorder;
+    private DotNetObjectReference<ScreenRecorder>? dotNetHelper;
+    private RecorderState recorderState = RecorderState.Idle;
+    private string? message, mediaBlobUrl,fileName;
+    private bool isPaused;
+
+
+    [Parameter]
+    public bool SystemAudio { get; set; } = true;
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if(firstRender)
+        {
+            dotNetHelper = DotNetObjectReference.Create(this);
+
+            module = await JS.InvokeAsync<IJSObjectReference>("import",
+            "./Shared/ScreenRecorder.razor.js");
+        }
+    }
+
+    private async Task StartSharing()
+    {
+        message = string.Empty;
+
+        try
+        {
+            if (module is not null)
+            {
+                var screenOptions = new
+                {
+                    Video = true,
+                    Audio = SystemAudio
+                };
+
+                await module.InvokeVoidAsync("addScreenToVideo", videoElement, screenOptions, dotNetHelper);
+
+                recorderState = RecorderState.NotRecording;
+            }
+        }
+        catch (JSException ex)
+        {
+            message = ex.Message;
+        }
+    }
+
+    [JSInvokable]
+    public async Task ScreenEnded()
+    {
+        recorderState = RecorderState.Idle;
+        StateHasChanged();
+    }
+
+
+
+    private async Task StartRecording()
+    {
+        if(module is not null)
+        {
+            recorder = await module.InvokeAsync<IJSObjectReference>("getRecorder", videoElement);
+            if(recorder is not null)
+            {
+                await recorder.InvokeVoidAsync("start");
+                recorderState = RecorderState.Recording;
+            }
+        }
+    }
+
+    private async Task PauseResumeRecording()
+    {
+        if (recorderState != RecorderState.Recording)
+            return;
+
+        if (recorder is not null)
+        {
+            if (isPaused)
+            {
+                await recorder.InvokeVoidAsync("resume");
+            }
+            else
+            {
+                await recorder.InvokeVoidAsync("pause");
+            }
+
+            isPaused = !isPaused;
+        }
+    }
+
+    private async Task StopRecording()
+    {
+        if (recorderState != RecorderState.Recording)
+            return;
+
+        if (recorder is not null)
+        {
+            await recorder.InvokeVoidAsync("stop");
+        }
+    }
+
+    private async Task Restart()
+    {
+        recorderState = RecorderState.Idle;
+    }
+
+    [JSInvokable]
+    public async Task RecordComplete(string mediaBlobUrl,string fileExtension)
+    {
+        this.mediaBlobUrl = mediaBlobUrl;
+        this.fileName = $"result.{fileExtension}";
+        isPaused = false;
+        recorderState = RecorderState.RecordingComplete;
+
+        StateHasChanged();
+    }
+
+
+
+
+
+    public async ValueTask DisposeAsync()
+    {
+        if(dotNetHelper is not null)
+        {
+            dotNetHelper.Dispose();
+        }
+
+        if(recorder is not null)
+        {
+            await recorder.DisposeAsync();
+        }
+
+        if(module is not null)
+        {
+            await module.DisposeAsync();
+        }
+    }
+}
