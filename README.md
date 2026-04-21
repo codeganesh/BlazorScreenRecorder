@@ -1,1 +1,1 @@
-# A simple screen recorder app built with Blazor.
+# A simple screen recorder app built with Blazor
